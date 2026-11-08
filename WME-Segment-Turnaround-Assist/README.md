@@ -66,7 +66,7 @@ Edit those to match your area's conventions. The type names and ranking are in t
 
 ## Feedback
 
-Please report problems on the [issues page](https://github.com/TxAgBQ/WME-Shared-Scripts/issues). Include the segment IDs and a screenshot of the list if you can.
+Please report problems on the script's [Greasy Fork feedback page](https://greasyfork.org/en/scripts/604417-wme-segment-turnaround-assist/feedback). Include the segment IDs and a screenshot of the list if you can.
 
 ## License
 

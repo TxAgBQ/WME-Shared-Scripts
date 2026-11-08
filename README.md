@@ -16,7 +16,7 @@ Install a userscript manager such as [Tampermonkey](https://www.tampermonkey.net
 
 ## Feedback
 
-Open an [issue](https://github.com/TxAgBQ/WME-Shared-Scripts/issues) with the script name and what happened.
+Use the Feedback tab on the script's Greasy Fork page and say what happened.
 
 ## License
 

@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         WME Segment Turnaround Assist
 // @namespace    https://greasyfork.org/users/820296-txagbq
-// @version      2026.11.08.03
+// @version      2026.11.08.04
 // @description  Finds Texas segments named "Turnaround" and matches them to the frontage road (road type, lock, +1 routing). Review a checklist, apply, then save in WME yourself.
 // @author       TxAgBQ
 // @license      MIT
-// @homepageURL  https://github.com/TxAgBQ/WME-Shared-Scripts/tree/main/WME-Segment-Turnaround-Assist
-// @supportURL   https://github.com/TxAgBQ/WME-Shared-Scripts/issues
+// @homepageURL  https://greasyfork.org/en/scripts/604417-wme-segment-turnaround-assist
+// @supportURL   https://greasyfork.org/en/scripts/604417-wme-segment-turnaround-assist/feedback
 // @match        https://www.waze.com/editor*
 // @match        https://www.waze.com/*/editor*
 // @match        https://beta.waze.com/editor*
@@ -52,7 +52,7 @@
 
     const SCRIPT_ID = 'wme-segment-turnaround-assist';
     const SCRIPT_NAME = 'WME Segment Turnaround Assist';
-    const VERSION = '2026.11.08.03'; // keep in sync with @version
+    const VERSION = '2026.11.08.04'; // keep in sync with @version
     const LOG = '[WSTA]';
 
     const CFG = {
