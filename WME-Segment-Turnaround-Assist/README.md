@@ -42,7 +42,7 @@ The card can be dragged by its grip and minimized to an icon in the stack of but
 ## Installing
 
 1. Install a userscript manager such as [Tampermonkey](https://www.tampermonkey.net/).
-2. Install the script from its Greasy Fork page. A link will be added here once it is published.
+2. Install the script from its [Greasy Fork page](https://greasyfork.org/en/scripts/604417-wme-segment-turnaround-assist).
 
 It works in both production and beta WME.
 

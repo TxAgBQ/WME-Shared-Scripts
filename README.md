@@ -6,7 +6,7 @@ Userscripts for the Waze Map Editor (WME) by TxAgBQ. They work in both productio
 
 | Script | What it does |
 | --- | --- |
-| [WME Segment Turnaround Assist](WME-Segment-Turnaround-Assist/) | Finds Texas "Turnaround" segments and matches road type, lock and routing to the frontage road. You review and save. |
+| [WME Segment Turnaround Assist](WME-Segment-Turnaround-Assist/) ([Greasy Fork](https://greasyfork.org/en/scripts/604417-wme-segment-turnaround-assist)) | Finds Texas "Turnaround" segments and matches road type, lock and routing to the frontage road. You review and save. |
 
 ## Installing
 
