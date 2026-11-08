@@ -1,1 +1,21 @@
 # WME-Shared-Scripts
+
+Userscripts for the Waze Map Editor (WME) by TxAgBQ. They work in both production and beta WME and use the WME SDK.
+
+## Scripts
+
+| Script | What it does |
+| --- | --- |
+| [WME Segment Turnaround Assist](WME-Segment-Turnaround-Assist/) | Finds Texas "Turnaround" segments and matches road type, lock and routing to the frontage road. You review and save. |
+
+## Installing
+
+Install a userscript manager such as [Tampermonkey](https://www.tampermonkey.net/), then install scripts from their Greasy Fork pages. Each script's folder has its own README with details.
+
+## Feedback
+
+Open an [issue](https://github.com/TxAgBQ/WME-Shared-Scripts/issues) with the script name and what happened.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
