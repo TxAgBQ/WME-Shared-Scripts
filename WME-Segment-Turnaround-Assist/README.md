@@ -17,8 +17,13 @@ A turnaround needs fixing when any of these differ from what it should be:
 | Road type | Copied from the frontage road. Only Ramp, Minor Highway and Major Highway count. If the two ends differ, the lowest type wins (Ramp, then Minor Hwy, then Major Hwy). A ramp that branches off the frontage road does not decide the type when a Minor or Major Highway is also at that end. |
 | Lock | Raised to L5, or to your own maximum rank if that is lower. It never lowers a lock. |
 | Routing (+1) | Copied only when every named frontage segment shares the same routing type. |
+| Turn onto the turnaround | The turn from the frontage road into the first turnaround segment should be enabled and have its Voice prompt set to **U-turn**. The script sets it for you (see below). |
 
 Turnarounds that connect street to street are left alone.
+
+### The U-turn voice prompt
+
+The WME SDK can read a turn's instruction but not change it, so the script sets it through WME's own Turn menu: it selects the frontage segment, hovers the turn arrow and sets **Voice prompt** to U-turn. The edit is a normal unsaved WME edit and can be undone. If several segments lead onto a turnaround and none is set to U-turn, the row is flagged for you to fix by hand. A turn that is not enabled is also flagged, not changed.
 
 ### Rows that need review
 
@@ -62,6 +67,11 @@ Edit those to match your area's conventions. The type names and ranking are in t
 - Uses the WME SDK in async mode only. It does not use `W.*` or OpenLayers internals.
 - The SDK's lock ranks are zero-based: 2 is L3, 3 is L4, 4 is L5.
 - Only changed fields are sent to WME, because the SDK rejects an update that changes nothing.
+
+## Changelog
+
+- 2026.11.11.03: Sets the turn onto the turnaround to U-turn; flags turns that are not enabled.
+- 2026.11.11.01: Works in any state, not just Texas.
 
 ## Feedback
 

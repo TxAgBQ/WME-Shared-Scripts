@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Segment Turnaround Assist
 // @namespace    https://greasyfork.org/users/820296-txagbq
-// @version      2026.11.11.01
+// @version      2026.11.11.03
 // @description  Finds segments named "Turnaround" and matches them to the frontage road (road type, lock, +1 routing). Review a checklist, apply, then save in WME yourself.
 // @author       TxAgBQ
 // @license      MIT
@@ -63,6 +63,7 @@
         // Types we copy, lowest first. When the two ends differ, the lowest one wins
         // (Minor Hwy into a Ramp makes the turnaround a Ramp).
         typeOrder: [4, 7, 6],
+        uTurnOpCode: 'UTURN',           // instruction the turn into a turnaround should carry
         rampType: 4,
         streetType: 1,                  // street to street turnarounds are fine as they are
         targetLockRank: 4,              // zero-based: 4 = L5. Capped to the editor's own rank.
@@ -285,6 +286,7 @@
         const idSet = new Set(ids);
         const neighbors = [];
         const endHasUsable = [];
+        const namedIds = new Set(); // named frontage/ramp segments feeding the turnaround
         const unnamedOnly = []; // ends with connectors but no named road
         const fallback = [];    // all neighbors, used only when no end has a named road
         for (const nodeId of endNodes) {
@@ -300,6 +302,7 @@
                 anyHere = true;
                 if (!(await streetNameOf(other))) continue;
                 here.push(other);
+                namedIds.add(other.id);
             }
             if (!here.length) {
                 if (!anyHere) return review(res, 'Nothing is connected at one end.');
@@ -349,7 +352,33 @@
             if (Object.keys(changes).length) res.perSegment.push({ id: seg.id, changes });
         }
 
-        if (!res.perSegment.length) {
+        // The turn from the frontage road onto the turnaround (only the first segment of the chain has one)
+        // should be allowed and carry the U-turn instruction. The SDK can read the instruction but updateTurn()
+        // cannot change it, so the fix drives WME's own Turn menu (see setTurnInstruction).
+        // If several frontage segments enter the turnaround, a turn that is already U-turn settles it; with none
+        // set and more than one candidate the script cannot tell which one, so that is left for a hand fix.
+        const entryTurns = [];
+        let turnBlocked = false;
+        for (const m of members) {
+            const turns = await sdk.DataModel.Turns.getTurnsToSegment({ segmentId: m.id });
+            for (const t of turns) {
+                if (idSet.has(t.fromSegmentId) || !namedIds.has(t.fromSegmentId)) continue;
+                if (!t.isAllowed) { turnBlocked = true; continue; }
+                entryTurns.push(t);
+            }
+        }
+        const hasUTurn = entryTurns.some((t) => t.instructionOpCode === CFG.uTurnOpCode);
+        const turnFixes = [];
+        let turnAmbiguous = false;
+        if (!hasUTurn && entryTurns.length === 1) turnFixes.push({ turnId: entryTurns[0].id, fromSegmentId: entryTurns[0].fromSegmentId });
+        else if (!hasUTurn && entryTurns.length > 1) turnAmbiguous = true;
+        res.turnFixes = turnFixes;
+
+        if (!res.perSegment.length && !turnFixes.length) {
+            const turnIssues = [];
+            if (turnBlocked) turnIssues.push('The turn onto the turnaround is not enabled.');
+            if (turnAmbiguous) turnIssues.push('Several turns lead onto the turnaround and none is set to U-turn (set the right one by hand).');
+            if (turnIssues.length) return review(res, turnIssues.join(' '));
             res.summary = 'Already matches';
             return res;
         }
@@ -360,6 +389,10 @@
             parts.push('Lock: L' + (lockGoal + 1) + (lockGoal < CFG.targetLockRank ? ' (your max)' : ''));
         }
         if (res.perSegment.some((p) => p.changes.routingRoadType !== undefined)) parts.push('Routing: ' + typeName(targetRoute));
+        if (turnFixes.length) parts.push('Turn: U-turn');
+        // Not fixable by the script: shown so it is not forgotten.
+        if (turnAmbiguous) parts.push('also set the U-turn by hand (several turns lead in)');
+        if (turnBlocked) parts.push('turn onto it is not enabled');
         res.summary = (ids.length > 1 ? ids.length + ' segments · ' : '') + parts.join(' · ');
 
         // All or nothing: if any segment of the chain is not editable, flag the whole thing.
@@ -368,7 +401,7 @@
             if (!allowed) return review(res, 'You cannot edit segment ' + p.id + ' (' + res.summary + ' needed).');
         }
 
-        if (override && !force) {
+        if (override && !force && res.perSegment.length) {
             const found = [...allTypes].map(typeName).join(' / ');
             res.status = 'review';
             res.overridable = true;
@@ -377,6 +410,48 @@
         }
         res.status = 'fix';
         return res;
+    }
+
+    // ---------- turn instruction (driven through WME's own Turn menu) ----------
+    // The SDK has no way to change a turn's instruction (updateTurn only does allow/restrict/guidance), so this
+    // selects the incoming segment, hovers the turn arrow to open the Turn menu and sets its "Voice prompt".
+    // The edit goes through WME itself, so it stays unsaved and undoable like any other change.
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    async function waitFor(fn, ms) {
+        const end = Date.now() + ms;
+        for (;;) {
+            const v = fn();
+            if (v) return v;
+            if (Date.now() > end) return null;
+            await sleep(80);
+        }
+    }
+    function fireMouse(el, types) {
+        const r = el.getBoundingClientRect();
+        const o = { bubbles: true, cancelable: true, composed: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2, view: window };
+        for (const t of types) el.dispatchEvent(new MouseEvent(t, o));
+    }
+    const LEAVE = ['mouseout', 'mouseleave', 'pointerout', 'pointerleave'];
+    const HOVER = ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointermove', 'mousemove'];
+    // A leftover Turn menu would belong to some other turn, so close any before opening ours.
+    async function closeTurnMenus() {
+        document.querySelectorAll('.arrow[data-id]').forEach((a) => fireMouse(a, LEAVE));
+        return !!(await waitFor(() => !document.querySelector('#opcode-select'), 1500));
+    }
+    async function setTurnInstruction(turnId, fromSegmentId, opCode) {
+        sdk.Editing.setSelection({ selection: { ids: [fromSegmentId], objectType: 'segment' } });
+        const arrow = await waitFor(() => document.querySelector('.arrow[data-id="' + turnId + '"]'), 4000);
+        if (!arrow || !(await closeTurnMenus())) return false;
+        fireMouse(arrow, HOVER);
+        const sel = await waitFor(() => document.querySelector('#opcode-select'), 3000);
+        if (!sel) return false;
+        sel.value = opCode;
+        sel.dispatchEvent(new CustomEvent('change', { bubbles: true, composed: true, detail: { value: opCode } }));
+        sel.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+        await sleep(400);
+        await closeTurnMenus();
+        const t = await sdk.DataModel.Turns.getById({ turnId });
+        return !!t && t.instructionOpCode === opCode;
     }
 
     // ---------- applying (never saves) ----------
@@ -390,19 +465,24 @@
         for (const p of res.perSegment) {
             await sdk.DataModel.Segments.updateSegment({ segmentId: p.id, ...p.changes });
         }
+        for (const t of res.turnFixes || []) {
+            if (!(await setTurnInstruction(t.turnId, t.fromSegmentId, CFG.uTurnOpCode))) {
+                throw new Error('could not set the turn instruction to U-turn on ' + t.turnId);
+            }
+        }
 
-        // Verify; if a field did not stick, retry the leftovers one at a time.
+        // Verify; if a segment field did not stick, retry the leftovers one at a time.
         let again = await evaluateGroup(await loadMembers(ids), force);
-        if (again.status === 'fix') {
+        if (again.status === 'fix' && again.perSegment.length) {
             for (const p of again.perSegment) {
                 for (const [field, value] of Object.entries(p.changes)) {
                     try { await sdk.DataModel.Segments.updateSegment({ segmentId: p.id, [field]: value }); } catch (e) { console.warn(LOG, p.id, field, e); }
                 }
             }
             again = await evaluateGroup(await loadMembers(ids), force);
-            if (again.status === 'fix') throw new Error('could not apply: ' + again.summary);
         }
-        return { done: true, segments: res.perSegment.length };
+        if (again.status === 'fix') throw new Error('could not apply: ' + again.summary);
+        return { done: true, segments: res.perSegment.length, turns: (res.turnFixes || []).length };
     }
 
     async function applyChecked() {
@@ -417,18 +497,19 @@
         updateApplyButton();
         let done = 0;
         let segs = 0;
+        let turns = 0;
         const problems = [];
         for (const row of rows) {
             try {
                 const r = await applyGroup(row.ids, forced.has(row.key));
-                if (r.done) { done += 1; segs += r.segments; } else problems.push(row.key + ': ' + r.note);
+                if (r.done) { done += 1; segs += r.segments; turns += r.turns || 0; } else problems.push(row.key + ': ' + r.note);
             } catch (e) {
                 problems.push(row.key + ': ' + (e && e.message ? e.message : e));
             }
         }
         applying = false;
         closePanel(); // the list goes away once the changes are applied
-        let msg = 'Applied ' + done + ' of ' + rows.length + ' turnaround(s), ' + segs + ' segment(s) changed. Not saved yet: save in WME.';
+        let msg = 'Applied ' + done + ' of ' + rows.length + ' turnaround(s), ' + segs + ' segment(s)' + (turns ? ' and ' + turns + ' turn(s)' : '') + ' changed. Not saved yet: save in WME.';
         if (problems.length) {
             msg += ' Problems: ' + problems.join('; ');
             console.warn(LOG, 'problems', problems);
