@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         WME Segment Turnaround Assist
 // @namespace    https://greasyfork.org/users/820296-txagbq
-// @version      2026.11.08.05
-// @description  Finds Texas segments named "Turnaround" and matches them to the frontage road (road type, lock, +1 routing). Review a checklist, apply, then save in WME yourself.
+// @version      2026.11.11.01
+// @description  Finds segments named "Turnaround" and matches them to the frontage road (road type, lock, +1 routing). Review a checklist, apply, then save in WME yourself.
 // @author       TxAgBQ
 // @license      MIT
 // @homepageURL  https://greasyfork.org/en/scripts/604417-wme-segment-turnaround-assist
@@ -23,7 +23,7 @@
  * WME Segment Turnaround Assist
  *
  * What it does
- *   - Looks at segments in the visible part of the map whose primary street is "Turnaround" and whose state is Texas.
+ *   - Looks at segments in the visible part of the map whose primary street is "Turnaround" (any state).
  *     Several Turnaround segments in a row are handled as ONE turnaround (one row, one checkbox).
  *   - The frontage road is the NAMED segments at the two outer ends of the turnaround. Names may differ
  *     per end (I-10 W Frontage Rd / I-10 E Frontage Rd, Grand Pkwy, ...). Unnamed segments there are
@@ -59,7 +59,6 @@
 
     const CFG = {
         streetName: 'turnaround',       // compared case-insensitively against the primary street name
-        stateName: 'Texas',
         typeNames: { 1: 'Street', 4: 'Ramp', 6: 'Major Hwy', 7: 'Minor Hwy' },
         // Types we copy, lowest first. When the two ends differ, the lowest one wins
         // (Minor Hwy into a Ramp makes the turnaround a Ramp).
@@ -255,12 +254,6 @@
             if (!turnStreetIds.has(seed.primaryStreetId) || seen.has(seed.id)) continue;
             if (!boxIntersects(seed.geometry, ext)) continue;
             const members = await collectChain(seed, seen);
-            let allTexas = true;
-            for (const m of members) {
-                const addr = await sdk.DataModel.Segments.getAddress({ segmentId: m.id });
-                if (!addr || !addr.state || addr.state.name !== CFG.stateName) { allTexas = false; break; }
-            }
-            if (!allTexas) continue;
             found.push(await evaluateGroup(members));
         }
         const order = { fix: 0, review: 1, ok: 2 };

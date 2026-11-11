@@ -1,12 +1,12 @@
 # WME Segment Turnaround Assist
 
-A Waze Map Editor userscript that finds Texas "Turnaround" segments and makes them match the frontage road they belong to: road type, lock level and (when the frontage road shares one) the +1 routing type.
+A Waze Map Editor userscript that finds "Turnaround" segments and makes them match the frontage road they belong to: road type, lock level and (when the frontage road shares one) the +1 routing type.
 
 It never saves for you. You review a checklist, apply the rows you want, then save in WME yourself.
 
 ## What it checks
 
-The script looks at segments in the part of the map you can see whose primary street is named **Turnaround** and whose state is **Texas**. Several Turnaround segments in a row are treated as one turnaround (one row, one checkbox).
+The script looks at segments in the part of the map you can see whose primary street is named **Turnaround**, in any state. Several Turnaround segments in a row are treated as one turnaround (one row, one checkbox).
 
 For each turnaround it looks at the two outer ends and finds the **named** segments there. That is the frontage road, and its names may differ at each end (for example I-10 W Frontage Rd and I-10 E Frontage Rd). Unnamed segments at an end are treated as at-grade connectors and ignored.
 
@@ -52,7 +52,6 @@ The state and street name are set at the top of the script in the `CFG` block:
 
 ```js
 streetName: 'turnaround',   // compared case-insensitively against the primary street name
-stateName: 'Texas',
 targetLockRank: 4,          // zero-based: 4 = L5
 ```
 
