@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         WME Segment Turnaround Assist
 // @namespace    https://greasyfork.org/users/820296-txagbq
-// @version      2026.11.11.03
+// @version      2026.11.11.04
 // @description  Finds segments named "Turnaround" and matches them to the frontage road (road type, lock, +1 routing). Review a checklist, apply, then save in WME yourself.
 // @author       TxAgBQ
 // @license      MIT
 // @homepageURL  https://greasyfork.org/en/scripts/604417-wme-segment-turnaround-assist
+// @updateURL    https://update.greasyfork.org/scripts/604417/WME%20Segment%20Turnaround%20Assist.meta.js
+// @downloadURL  https://update.greasyfork.org/scripts/604417/WME%20Segment%20Turnaround%20Assist.user.js
 // @supportURL   https://greasyfork.org/en/scripts/604417-wme-segment-turnaround-assist/feedback
 // @match        https://www.waze.com/editor*
 // @match        https://www.waze.com/*/editor*

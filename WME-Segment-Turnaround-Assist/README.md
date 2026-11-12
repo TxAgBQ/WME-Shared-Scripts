@@ -70,6 +70,7 @@ Edit those to match your area's conventions. The type names and ranking are in t
 
 ## Changelog
 
+- 2026.11.11.04: Added @updateURL and @downloadURL so Tampermonkey auto-updates from Greasy Fork.
 - 2026.11.11.03: Sets the turn onto the turnaround to U-turn; flags turns that are not enabled.
 - 2026.11.11.01: Works in any state, not just Texas.
 
