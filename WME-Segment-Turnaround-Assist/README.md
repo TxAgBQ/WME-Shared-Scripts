@@ -23,7 +23,7 @@ Turnarounds that connect street to street are left alone.
 
 ### The U-turn voice prompt
 
-The WME SDK can read a turn's instruction but not change it, so the script sets it through WME's own Turn menu: it selects the frontage segment, hovers the turn arrow and sets **Voice prompt** to U-turn. The edit is a normal unsaved WME edit and can be undone. If several segments lead onto a turnaround and none is set to U-turn, the row is flagged for you to fix by hand. A turn that is not enabled is also flagged, not changed.
+The WME SDK can read a turn's instruction but not change it, so the script sets it through WME's own Turn menu: it selects the frontage segment, hovers the turn arrow and sets **Voice prompt** to U-turn. The edit is a normal unsaved WME edit and can be undone. If several segments lead onto a turnaround and none is set to U-turn, the row is flagged for you to fix by hand. A turn that is not enabled is also flagged, not changed. Turn arrows only exist from zoom 17, so when you apply at a lower zoom the script briefly zooms in on each turn and puts your view back afterwards.
 
 ### Rows that need review
 
@@ -70,6 +70,9 @@ Edit those to match your area's conventions. The type names and ranking are in t
 
 ## Changelog
 
+- 2026.11.12.06: Sets turns even when you apply at zoom 16 or lower: it centres on the turn, zooms in, sets it (with retries), then restores your view and deselects.
+- 2026.11.12.02: Also checks the turn leaving a one-way turnaround. Its Voice prompt should be None, or Waze selected with an angle under 45.5 degrees; otherwise it is set to None. An exit that splits into several turns is left alone.
+- 2026.11.12.01: A one-way turnaround is only checked at its entry end; the disallowed turn at the far end is no longer flagged as "not enabled".
 - 2026.11.11.04: Added @updateURL and @downloadURL so Tampermonkey auto-updates from Greasy Fork.
 - 2026.11.11.03: Sets the turn onto the turnaround to U-turn; flags turns that are not enabled.
 - 2026.11.11.01: Works in any state, not just Texas.

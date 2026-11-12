@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Segment Turnaround Assist
 // @namespace    https://greasyfork.org/users/820296-txagbq
-// @version      2026.11.11.04
+// @version      2026.11.12.06
 // @description  Finds segments named "Turnaround" and matches them to the frontage road (road type, lock, +1 routing). Review a checklist, apply, then save in WME yourself.
 // @author       TxAgBQ
 // @license      MIT
@@ -65,7 +65,11 @@
         // Types we copy, lowest first. When the two ends differ, the lowest one wins
         // (Minor Hwy into a Ramp makes the turnaround a Ramp).
         typeOrder: [4, 7, 6],
-        uTurnOpCode: 'UTURN',           // instruction the turn into a turnaround should carry
+        uTurnOpCode: 'UTURN',
+        turnMinZoom: 17,                // turn arrows (needed to set a turn instruction) only exist from this zoom
+        noneOpCode: 'NONE',             // instruction wanted on the turn leaving the turnaround
+        maxQuietAngle: 45.5,            // degrees: a turn sharper than this gets a spoken instruction when left on "Waze selected"
+                   // instruction the turn into a turnaround should carry
         rampType: 4,
         streetType: 1,                  // street to street turnarounds are fine as they are
         targetLockRank: 4,              // zero-based: 4 = L5. Capped to the editor's own rank.
@@ -271,6 +275,22 @@
         return res;
     }
 
+    // Turn angle (degrees, 0 = straight on) worked out from the two segments' geometry at the shared node.
+    // The SDK does not expose the angle WME itself uses, so this is an estimate from the last/first leg.
+    function legBearing(coords, atEnd) {
+        const n = coords.length;
+        const [a, b] = atEnd ? [coords[n - 2], coords[n - 1]] : [coords[0], coords[1]];
+        return Math.atan2((b[0] - a[0]) * Math.cos(b[1] * Math.PI / 180), b[1] - a[1]) * 180 / Math.PI;
+    }
+    async function turnAngle(t) {
+        const from = await sdk.DataModel.Segments.getById({ segmentId: t.fromSegmentId });
+        const to = await sdk.DataModel.Segments.getById({ segmentId: t.toSegmentId });
+        if (!from || !to) return null;
+        const inHeading = legBearing(from.geometry.coordinates, t.fromSegmentFwd) + (t.fromSegmentFwd ? 0 : 180);
+        const outHeading = legBearing(to.geometry.coordinates, !t.toSegmentFwd) + (t.toSegmentFwd ? 0 : 180);
+        return ((outHeading - inHeading + 540) % 360) - 180;
+    }
+
     // One result per turnaround (a single segment, or a chain of Turnaround segments).
     async function evaluateGroup(members, force) {
         const ids = members.map((m) => m.id);
@@ -365,6 +385,12 @@
             const turns = await sdk.DataModel.Turns.getTurnsToSegment({ segmentId: m.id });
             for (const t of turns) {
                 if (idSet.has(t.fromSegmentId) || !namedIds.has(t.fromSegmentId)) continue;
+                // A one-way turnaround can only be entered at its start. A turn at the far end goes against the
+                // one-way direction, so it is never enabled and is not a real entry.
+                const feeder = await sdk.DataModel.Segments.getById({ segmentId: t.fromSegmentId });
+                const shared = feeder && [m.fromNodeId, m.toNodeId].find((n) => n === feeder.fromNodeId || n === feeder.toNodeId);
+                const legal = (m.isAtoB && m.isBtoA) || (m.isAtoB && shared === m.fromNodeId) || (m.isBtoA && shared === m.toNodeId);
+                if (!legal) continue;
                 if (!t.isAllowed) { turnBlocked = true; continue; }
                 entryTurns.push(t);
             }
@@ -372,8 +398,31 @@
         const hasUTurn = entryTurns.some((t) => t.instructionOpCode === CFG.uTurnOpCode);
         const turnFixes = [];
         let turnAmbiguous = false;
-        if (!hasUTurn && entryTurns.length === 1) turnFixes.push({ turnId: entryTurns[0].id, fromSegmentId: entryTurns[0].fromSegmentId });
+        if (!hasUTurn && entryTurns.length === 1) turnFixes.push({ turnId: entryTurns[0].id, fromSegmentId: entryTurns[0].fromSegmentId, opCode: CFG.uTurnOpCode, label: 'Turn: U-turn' });
         else if (!hasUTurn && entryTurns.length > 1) turnAmbiguous = true;
+        // The turn leaving the turnaround (one-way turnarounds only) should give no spoken instruction: Voice prompt
+        // None, or Waze selected with a gentle enough angle. If the end splits into several exits, leave them
+        // alone, because drivers then need an instruction to know which one to take.
+        const oneWay = members.every((m) => m.isAtoB !== m.isBtoA);
+        if (oneWay) {
+            const exits = [];
+            for (const m of members) {
+                for (const t of await sdk.DataModel.Turns.getTurnsFromSegment({ segmentId: m.id })) {
+                    if (idSet.has(t.toSegmentId) || !t.isAllowed) continue;
+                    exits.push(t);
+                }
+            }
+            if (exits.length === 1) {
+                const t = exits[0];
+                const op = t.instructionOpCode;
+                let bad = op !== null && op !== undefined && op !== CFG.noneOpCode;
+                if (!bad && (op === null || op === undefined)) {
+                    const angle = await turnAngle(t);
+                    bad = angle !== null && Math.abs(angle) >= CFG.maxQuietAngle;
+                }
+                if (bad) turnFixes.push({ turnId: t.id, fromSegmentId: t.fromSegmentId, opCode: CFG.noneOpCode, label: 'Exit turn: None' });
+            }
+        }
         res.turnFixes = turnFixes;
 
         if (!res.perSegment.length && !turnFixes.length) {
@@ -391,7 +440,7 @@
             parts.push('Lock: L' + (lockGoal + 1) + (lockGoal < CFG.targetLockRank ? ' (your max)' : ''));
         }
         if (res.perSegment.some((p) => p.changes.routingRoadType !== undefined)) parts.push('Routing: ' + typeName(targetRoute));
-        if (turnFixes.length) parts.push('Turn: U-turn');
+        for (const f of turnFixes) parts.push(f.label);
         // Not fixable by the script: shown so it is not forgotten.
         if (turnAmbiguous) parts.push('also set the U-turn by hand (several turns lead in)');
         if (turnBlocked) parts.push('turn onto it is not enabled');
@@ -442,18 +491,47 @@
     }
     async function setTurnInstruction(turnId, fromSegmentId, opCode) {
         sdk.Editing.setSelection({ selection: { ids: [fromSegmentId], objectType: 'segment' } });
-        const arrow = await waitFor(() => document.querySelector('.arrow[data-id="' + turnId + '"]'), 4000);
-        if (!arrow || !(await closeTurnMenus())) return false;
-        fireMouse(arrow, HOVER);
-        const sel = await waitFor(() => document.querySelector('#opcode-select'), 3000);
-        if (!sel) return false;
-        sel.value = opCode;
-        sel.dispatchEvent(new CustomEvent('change', { bubbles: true, composed: true, detail: { value: opCode } }));
-        sel.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
-        await sleep(400);
-        await closeTurnMenus();
-        const t = await sdk.DataModel.Turns.getById({ turnId });
-        return !!t && t.instructionOpCode === opCode;
+        // WME only draws turn arrows from zoom 17 up, and only near the view. So centre on the turn first, then
+        // zoom in, then wait for its arrow (the view is put back after Apply).
+        const arrowSel = '.arrow[data-id="' + turnId + '"]';
+        let arrow = (await sdk.Map.getZoomLevel()) >= CFG.turnMinZoom ? await waitFor(() => document.querySelector(arrowSel), 800) : null;
+        if (!arrow) {
+            const turn = await sdk.DataModel.Turns.getById({ turnId });
+            const a = await sdk.DataModel.Segments.getById({ segmentId: fromSegmentId });
+            const b = turn && (await sdk.DataModel.Segments.getById({ segmentId: turn.toSegmentId }));
+            const nodeId = a && b && [a.fromNodeId, a.toNodeId].find((n) => n === b.fromNodeId || n === b.toNodeId);
+            const node = nodeId && (await sdk.DataModel.Nodes.getById({ nodeId }));
+            if (node && node.geometry) {
+                const [lon, lat] = node.geometry.coordinates;
+                await sdk.Map.setMapCenter({ lonLat: { lon, lat } });
+            }
+            if ((await sdk.Map.getZoomLevel()) < CFG.turnMinZoom) await sdk.Map.setZoomLevel({ zoomLevel: CFG.turnMinZoom });
+            await sleep(600);
+            sdk.Editing.setSelection({ selection: { ids: [fromSegmentId], objectType: 'segment' } }); // reselect once the view settled
+            arrow = await waitFor(() => document.querySelector(arrowSel), 5000);
+        }
+        if (!arrow) return false;
+        // The map is still settling right after a move or zoom, so a first try can be missed. Retry a few times.
+        for (let attempt = 0; attempt < 3; attempt++) {
+            await sleep(attempt === 0 ? 500 : 800);
+            const el = document.querySelector(arrowSel);
+            if (!el || !(await closeTurnMenus())) continue;
+            fireMouse(el, HOVER);
+            const sel = await waitFor(() => document.querySelector('#opcode-select'), 3000);
+            if (!sel) continue;
+            sel.value = opCode;
+            sel.dispatchEvent(new CustomEvent('change', { bubbles: true, composed: true, detail: { value: opCode } }));
+            sel.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+            let ok = false;
+            for (let i = 0; i < 25 && !ok; i++) {
+                await sleep(120);
+                const t = await sdk.DataModel.Turns.getById({ turnId });
+                ok = !!t && t.instructionOpCode === opCode;
+            }
+            await closeTurnMenus();
+            if (ok) return true;
+        }
+        return false;
     }
 
     // ---------- applying (never saves) ----------
@@ -468,8 +546,8 @@
             await sdk.DataModel.Segments.updateSegment({ segmentId: p.id, ...p.changes });
         }
         for (const t of res.turnFixes || []) {
-            if (!(await setTurnInstruction(t.turnId, t.fromSegmentId, CFG.uTurnOpCode))) {
-                throw new Error('could not set the turn instruction to U-turn on ' + t.turnId);
+            if (!(await setTurnInstruction(t.turnId, t.fromSegmentId, t.opCode))) {
+                throw new Error('could not set the turn instruction on ' + t.turnId);
             }
         }
 
@@ -497,6 +575,7 @@
         }
         applying = true;
         updateApplyButton();
+        const view = { zoom: await sdk.Map.getZoomLevel(), center: await sdk.Map.getMapCenter() };
         let done = 0;
         let segs = 0;
         let turns = 0;
@@ -510,6 +589,11 @@
             }
         }
         applying = false;
+        try { // setting a turn may have zoomed in; put the view back
+            if ((await sdk.Map.getZoomLevel()) !== view.zoom) await sdk.Map.setZoomLevel({ zoomLevel: view.zoom });
+            await sdk.Map.setMapCenter({ lonLat: view.center });
+        } catch (e) { console.warn(LOG, 'could not restore the view', e); }
+        try { await sdk.Editing.clearSelection(); } catch (e) { console.warn(LOG, 'could not clear the selection', e); } // setting turns selects segments
         closePanel(); // the list goes away once the changes are applied
         let msg = 'Applied ' + done + ' of ' + rows.length + ' turnaround(s), ' + segs + ' segment(s)' + (turns ? ' and ' + turns + ' turn(s)' : '') + ' changed. Not saved yet: save in WME.';
         if (problems.length) {
