@@ -14,9 +14,10 @@ A turnaround needs fixing when any of these differ from what it should be:
 
 | Property | Rule |
 | --- | --- |
-| Road type | Copied from the frontage road. Only Ramp, Minor Highway and Major Highway count. If the two ends differ, the lowest type wins (Ramp, then Minor Hwy, then Major Hwy). A ramp that branches off the frontage road does not decide the type when a Minor or Major Highway is also at that end. |
+| Road type | Copied from the frontage road. Only Ramp, Minor Highway and Major Highway count. If the two ends differ, the lowest type wins (Ramp, then Minor Hwy, then Major Hwy). A ramp that branches off the frontage road does not decide the type when a Minor or Major Highway (named or unnamed) is also at that end. |
 | Lock | Raised to L5, or to your own maximum rank if that is lower. It never lowers a lock. |
 | Routing (+1) | Copied only when every named frontage segment shares the same routing type. |
+| Speed limit | If every inbound segment and every outbound segment of a one-way turnaround has the same speed limit (in the direction of travel), the turnaround gets that exact limit. If they differ, or any has none, it is left alone. |
 | Turn onto the turnaround | The turn from the frontage road into the first turnaround segment should be enabled and have its Voice prompt set to **U-turn**. The script sets it for you (see below). |
 
 Turnarounds that connect street to street are left alone. A turnaround with a Primary Street on every side becomes a Primary Street at L5.
@@ -70,6 +71,7 @@ Edit those to match your area's conventions. The type names and ranking are in t
 
 ## Changelog
 
+- 2026.11.22.03: Copies the speed limit to the turnaround when all inbound and outbound segments share it (shown in mph in the list). A ramp at an end no longer decides the type when an unnamed Minor or Major Highway is also there.
 - 2026.11.20.01: Primary Street to Primary Street turnarounds are set to Primary Street at L5.
 - 2026.11.12.06: Sets turns even when you apply at zoom 16 or lower: it centres on the turn, zooms in, sets it (with retries), then restores your view and deselects.
 - 2026.11.12.02: Also checks the turn leaving a one-way turnaround. Its Voice prompt should be None, or Waze selected with an angle under 45.5 degrees; otherwise it is set to None. An exit that splits into several turns is left alone.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Segment Turnaround Assist
 // @namespace    https://greasyfork.org/users/820296-txagbq
-// @version      2026.11.20.01
+// @version      2026.11.22.03
 // @description  Finds segments named "Turnaround" and matches them to the frontage road (road type, lock, +1 routing). Review a checklist, apply, then save in WME yourself.
 // @author       TxAgBQ
 // @license      MIT
@@ -315,13 +315,14 @@
         for (const nodeId of endNodes) {
             const node = await sdk.DataModel.Nodes.getById({ nodeId });
             const here = [];
+            const everyone = []; // named and unnamed neighbours at this end
             let anyHere = false;
             for (const sid of (node && node.connectedSegmentIds) || []) {
                 if (idSet.has(sid)) continue;
                 const other = await sdk.DataModel.Segments.getById({ segmentId: sid });
                 if (!other) return review(res, 'A connected segment is not loaded. Pan or zoom and it will rescan.');
                 if (turnStreetIds.has(other.primaryStreetId)) continue;
-                fallback.push(other);
+                everyone.push(other);
                 anyHere = true;
                 if (!(await streetNameOf(other))) continue;
                 here.push(other);
@@ -333,8 +334,10 @@
             }
             // A ramp that branches off the frontage road at this end ("to Loop 1 S") does not decide the type
             // when a Minor/Major Highway is there too. Ramps only count at an end that has nothing else usable.
-            const hasHighway = here.some((n) => CFG.typeOrder.includes(n.roadType) && n.roadType !== CFG.rampType);
+            // Unnamed connectors count for this test too, so an unnamed Minor Hwy beside a ramp still wins.
+            const hasHighway = everyone.some((n) => CFG.typeOrder.includes(n.roadType) && n.roadType !== CFG.rampType);
             const kept = hasHighway ? here.filter((n) => n.roadType !== CFG.rampType) : here;
+            fallback.push(...(hasHighway ? everyone.filter((n) => n.roadType !== CFG.rampType) : everyone));
             neighbors.push(...kept);
             endHasUsable.push(kept.some((n) => CFG.typeOrder.includes(n.roadType)));
         }
@@ -383,17 +386,20 @@
         // If several frontage segments enter the turnaround, a turn that is already U-turn settles it; with none
         // set and more than one candidate the script cannot tell which one, so that is left for a hand fix.
         const entryTurns = [];
+        const slFeeders = new Set(); // any segment legally feeding the turnaround, named or not (for the speed limit)
         let turnBlocked = false;
         for (const m of members) {
             const turns = await sdk.DataModel.Turns.getTurnsToSegment({ segmentId: m.id });
             for (const t of turns) {
-                if (idSet.has(t.fromSegmentId) || !namedIds.has(t.fromSegmentId)) continue;
+                if (idSet.has(t.fromSegmentId)) continue;
                 // A one-way turnaround can only be entered at its start. A turn at the far end goes against the
                 // one-way direction, so it is never enabled and is not a real entry.
                 const feeder = await sdk.DataModel.Segments.getById({ segmentId: t.fromSegmentId });
                 const shared = feeder && [m.fromNodeId, m.toNodeId].find((n) => n === feeder.fromNodeId || n === feeder.toNodeId);
                 const legal = (m.isAtoB && m.isBtoA) || (m.isAtoB && shared === m.fromNodeId) || (m.isBtoA && shared === m.toNodeId);
                 if (!legal) continue;
+                if (t.isAllowed) slFeeders.add(t.fromSegmentId);
+                if (!namedIds.has(t.fromSegmentId)) continue;
                 if (!t.isAllowed) { turnBlocked = true; continue; }
                 entryTurns.push(t);
             }
@@ -428,6 +434,49 @@
         }
         res.turnFixes = turnFixes;
 
+        // Speed limit: if the segment feeding the turnaround and the segment it exits onto have the same speed
+        // limit, the turnaround gets that exact value. If they differ (or either has none), it is left alone.
+        if (oneWay && slFeeders.size) {
+            const feederIds = slFeeders;
+            const exitIds = new Set();
+            for (const m of members) {
+                for (const t of await sdk.DataModel.Turns.getTurnsFromSegment({ segmentId: m.id })) {
+                    if (!idSet.has(t.toSegmentId) && t.isAllowed) exitIds.add(t.toSegmentId);
+                }
+            }
+            // Every inbound and every outbound segment must carry the same speed limit, in the direction of travel.
+            const limits = new Set();
+            let missing = false;
+            for (const m of members) {
+                for (const id of feederIds) {
+                    const seg = await sdk.DataModel.Segments.getById({ segmentId: id });
+                    const node = [m.fromNodeId, m.toNodeId].find((n) => n === seg.fromNodeId || n === seg.toNodeId);
+                    if (!node) continue;
+                    const v = seg.toNodeId === node ? seg.fwdSpeedLimit : seg.revSpeedLimit;
+                    if (v) limits.add(v); else missing = true;
+                }
+                for (const id of exitIds) {
+                    const seg = await sdk.DataModel.Segments.getById({ segmentId: id });
+                    const node = [m.fromNodeId, m.toNodeId].find((n) => n === seg.fromNodeId || n === seg.toNodeId);
+                    if (!node) continue;
+                    const v = seg.fromNodeId === node ? seg.fwdSpeedLimit : seg.revSpeedLimit;
+                    if (v) limits.add(v); else missing = true;
+                }
+            }
+            if (exitIds.size && !missing && limits.size === 1) {
+                const sl = [...limits][0];
+                for (const m of members) {
+                    const field = m.isAtoB ? 'fwdSpeedLimit' : 'revSpeedLimit';
+                    if (m[field] !== sl) {
+                        let p = res.perSegment.find((x) => x.id === m.id);
+                        if (!p) { p = { id: m.id, changes: {} }; res.perSegment.push(p); }
+                        p.changes[field] = sl;
+                        res.speedLimit = sl;
+                    }
+                }
+            }
+        }
+
         if (!res.perSegment.length && !turnFixes.length) {
             const turnIssues = [];
             if (turnBlocked) turnIssues.push('The turn onto the turnaround is not enabled.');
@@ -443,6 +492,7 @@
             parts.push('Lock: L' + (lockGoal + 1) + (lockGoal < CFG.targetLockRank ? ' (your max)' : ''));
         }
         if (res.perSegment.some((p) => p.changes.routingRoadType !== undefined)) parts.push('Routing: ' + typeName(targetRoute));
+        if (res.perSegment.some((p) => p.changes.fwdSpeedLimit !== undefined || p.changes.revSpeedLimit !== undefined)) parts.push('Speed limit: ' + Math.round(res.speedLimit / 1.609344) + ' mph');
         for (const f of turnFixes) parts.push(f.label);
         // Not fixable by the script: shown so it is not forgotten.
         if (turnAmbiguous) parts.push('also set the U-turn by hand (several turns lead in)');
