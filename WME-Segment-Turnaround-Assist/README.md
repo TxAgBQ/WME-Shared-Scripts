@@ -19,7 +19,7 @@ A turnaround needs fixing when any of these differ from what it should be:
 | Routing (+1) | Copied only when every named frontage segment shares the same routing type. |
 | Turn onto the turnaround | The turn from the frontage road into the first turnaround segment should be enabled and have its Voice prompt set to **U-turn**. The script sets it for you (see below). |
 
-Turnarounds that connect street to street are left alone.
+Turnarounds that connect street to street are left alone. A turnaround with a Primary Street on every side becomes a Primary Street at L5.
 
 ### The U-turn voice prompt
 
@@ -70,6 +70,7 @@ Edit those to match your area's conventions. The type names and ranking are in t
 
 ## Changelog
 
+- 2026.11.20.01: Primary Street to Primary Street turnarounds are set to Primary Street at L5.
 - 2026.11.12.06: Sets turns even when you apply at zoom 16 or lower: it centres on the turn, zooms in, sets it (with retries), then restores your view and deselects.
 - 2026.11.12.02: Also checks the turn leaving a one-way turnaround. Its Voice prompt should be None, or Waze selected with an angle under 45.5 degrees; otherwise it is set to None. An exit that splits into several turns is left alone.
 - 2026.11.12.01: A one-way turnaround is only checked at its entry end; the disallowed turn at the far end is no longer flagged as "not enabled".

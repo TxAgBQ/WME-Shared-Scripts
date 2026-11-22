@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Segment Turnaround Assist
 // @namespace    https://greasyfork.org/users/820296-txagbq
-// @version      2026.11.12.06
+// @version      2026.11.20.01
 // @description  Finds segments named "Turnaround" and matches them to the frontage road (road type, lock, +1 routing). Review a checklist, apply, then save in WME yourself.
 // @author       TxAgBQ
 // @license      MIT
@@ -61,7 +61,7 @@
 
     const CFG = {
         streetName: 'turnaround',       // compared case-insensitively against the primary street name
-        typeNames: { 1: 'Street', 4: 'Ramp', 6: 'Major Hwy', 7: 'Minor Hwy' },
+        typeNames: { 1: 'Street', 2: 'Primary Street', 4: 'Ramp', 6: 'Major Hwy', 7: 'Minor Hwy' },
         // Types we copy, lowest first. When the two ends differ, the lowest one wins
         // (Minor Hwy into a Ramp makes the turnaround a Ramp).
         typeOrder: [4, 7, 6],
@@ -72,6 +72,7 @@
                    // instruction the turn into a turnaround should carry
         rampType: 4,
         streetType: 1,                  // street to street turnarounds are fine as they are
+        primaryStreetType: 2,           // Primary Street to Primary Street turnarounds are matched to Primary Street (L5)
         targetLockRank: 4,              // zero-based: 4 = L5. Capped to the editor's own rank.
         rescanDelayMs: 500,
         noteMs: 20000,                  // how long the "Applied..." note stays in the button tooltip
@@ -345,18 +346,20 @@
             res.summary = 'Street to street, left as is';
             return res;
         }
-        // Only Ramp / Minor / Major segments count as the road to copy. Anything else at an end
+        // Primary Street on every side: the turnaround becomes a Primary Street too.
+        const primaryOnly = allTypes.size === 1 && allTypes.has(CFG.primaryStreetType);
+        // Otherwise only Ramp / Minor / Major segments count as the road to copy. Anything else at an end
         // (a cross street such as Uhland Rd meeting the frontage road) is ignored.
-        const usable = neighbors.filter((n) => CFG.typeOrder.includes(n.roadType));
+        const usable = primaryOnly ? neighbors : neighbors.filter((n) => CFG.typeOrder.includes(n.roadType));
         if (!usable.length) {
             const found = [...allTypes].map(typeName).join(' / ');
             return review(res, 'No Ramp/Minor/Major Highway at either end (found: ' + found + ').');
         }
         // One end with nothing usable (for example a Street): can be applied, but only as an override.
-        const override = endHasUsable.some((ok) => !ok) || unnamedOnly.length > 0;
+        const override = (!primaryOnly && endHasUsable.some((ok) => !ok)) || unnamedOnly.length > 0;
         const types = new Set(usable.map((n) => n.roadType));
         // Lowest type among the usable neighbors at both ends.
-        const targetType = CFG.typeOrder.find((t) => types.has(t));
+        const targetType = primaryOnly ? CFG.primaryStreetType : CFG.typeOrder.find((t) => types.has(t));
 
         // Lock goal: L5, or this editor's own maximum if lower.
         const lockGoal = Math.min(CFG.targetLockRank, userRank);
