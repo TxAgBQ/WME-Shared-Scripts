@@ -24,7 +24,7 @@ Turnarounds that connect street to street are left alone. A turnaround with a Pr
 
 ### Left | left check
 
-A turnaround should match the frontage road's type only when Waze could otherwise route a left turn followed by a left turn back to where the turnaround ends. The script follows legal turns from the segment feeding the turnaround (never through the turnaround) and looks for a route back onto the segment it exits onto, within 500 m and 5 segments, whose turns add up to about a 180 degree left.
+A turnaround should match the frontage road's type only when Waze could otherwise route a left turn followed by a left turn back to where the turnaround ends. The script follows legal turns from the segment feeding the turnaround (never through the turnaround) and looks for a route back onto the segment it exits onto, within 500 m and 10 segments, whose turns add up to about a 180 degree left.
 
 - **Left | left found, one road type at the ends:** type, lock, routing and speed limit are applied as described above.
 - **Left | left found, mixed road types:** the row is flagged for review and nothing is changed.
@@ -83,6 +83,7 @@ Edit those to match your area's conventions. The type names and ranking are in t
 
 ## Changelog
 
+- 2026.11.26.01: The left | left search follows up to 10 segments (was 5), so frontage roads split into many short segments are handled.
 - 2026.11.25.04: **Update speed limits** checkbox in the list panel to turn speed limit updates off.
 - 2026.11.25.03: The left | left distance limit no longer counts the length of the segment the turnaround exits onto.
 - 2026.11.25.02: Hovering a row flashes that turnaround on the map.
