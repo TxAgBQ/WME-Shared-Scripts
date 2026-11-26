@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Segment Turnaround Assist
 // @namespace    https://greasyfork.org/users/820296-txagbq
-// @version      2026.11.26.01
+// @version      2026.11.26.02
 // @description  Finds segments named "Turnaround" and matches them to the frontage road (road type, lock, +1 routing). Review a checklist, apply, then save in WME yourself.
 // @author       TxAgBQ
 // @license      MIT
@@ -69,7 +69,7 @@
         turnMinZoom: 17,                // turn arrows (needed to set a turn instruction) only exist from this zoom
         noneOpCode: 'NONE',             // instruction wanted on the turn leaving the turnaround
         maxQuietAngle: 45.5,            // degrees: a turn sharper than this gets a spoken instruction when left on "Waze selected"
-        leftLeft: { maxMeters: 500, maxDepth: 10, maxVisits: 400, minTotal: -225, maxTotal: -135 }, // left | left alternative search
+        leftLeft: { maxMeters: 500, maxDepth: 10, maxVisits: 1500, minTotal: -225, maxTotal: -135 }, // left | left alternative search
                    // instruction the turn into a turnaround should carry
         rampType: 4,
         streetType: 1,                  // street to street turnarounds are fine as they are
@@ -351,30 +351,39 @@
             if (!cache.has(id)) cache.set(id, await sdk.DataModel.Segments.getById({ segmentId: id }));
             return cache.get(id);
         };
+        // Nearest routes first. A segment reached again with about the same accumulated turn is not explored twice,
+        // otherwise the many ways around a busy interchange use up the search before the real route is reached.
+        const seen = new Set();
+        const frontier = [];
+        for (const id of feederIds) {
+            const f = await get(id);
+            if (f && f.geometry) frontier.push({ seg: f, dist: 0, cum: 0, depth: 0 });
+        }
         let visits = 0;
-        const walk = async (seg, total, sum, depth) => {
-            if (depth > L.maxDepth || ++visits > L.maxVisits) return false;
-            for (const t of await sdk.DataModel.Turns.getTurnsFromSegment({ segmentId: seg.id })) {
+        while (frontier.length && visits < L.maxVisits) {
+            frontier.sort((a, b) => a.dist - b.dist);
+            const cur = frontier.shift();
+            visits++;
+            if (cur.depth >= L.maxDepth) continue;
+            for (const t of await sdk.DataModel.Turns.getTurnsFromSegment({ segmentId: cur.seg.id })) {
                 if (!t.isAllowed || blockedIds.has(t.toSegmentId)) continue;
                 const next = await get(t.toSegmentId);
                 if (!next || !next.geometry) continue;
-                const turn = signedTurn(seg, next);
+                const turn = signedTurn(cur.seg, next);
                 if (turn === null) continue;
-                const cum = sum + turn;
+                const cum = cur.cum + turn;
                 // The segment the turnaround exits onto is where the routes meet again, so its own length does not count.
                 if (exitIds.has(next.id)) {
                     if (cum >= L.minTotal && cum <= L.maxTotal) return true;
                     continue;
                 }
-                const dist = total + segLength(next);
+                const dist = cur.dist + segLength(next);
                 if (dist > L.maxMeters) continue;
-                if (await walk(next, dist, cum, depth + 1)) return true;
+                const key = next.id + '|' + Math.round(cum / 20);
+                if (seen.has(key)) continue;
+                seen.add(key);
+                frontier.push({ seg: next, dist, cum, depth: cur.depth + 1 });
             }
-            return false;
-        };
-        for (const id of feederIds) {
-            const f = await get(id);
-            if (f && f.geometry && (await walk(f, 0, 0, 0))) return true;
         }
         return false;
     }

@@ -83,6 +83,7 @@ Edit those to match your area's conventions. The type names and ranking are in t
 
 ## Changelog
 
+- 2026.11.26.02: The left | left search tries the nearest routes first and skips repeats, so busy interchanges with many ways around are handled.
 - 2026.11.26.01: The left | left search follows up to 10 segments (was 5), so frontage roads split into many short segments are handled.
 - 2026.11.25.04: **Update speed limits** checkbox in the list panel to turn speed limit updates off.
 - 2026.11.25.03: The left | left distance limit no longer counts the length of the segment the turnaround exits onto.
