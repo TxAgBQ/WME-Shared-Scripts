@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Segment Turnaround Assist
 // @namespace    https://greasyfork.org/users/820296-txagbq
-// @version      2026.11.22.03
+// @version      2026.11.25.04
 // @description  Finds segments named "Turnaround" and matches them to the frontage road (road type, lock, +1 routing). Review a checklist, apply, then save in WME yourself.
 // @author       TxAgBQ
 // @license      MIT
@@ -69,6 +69,7 @@
         turnMinZoom: 17,                // turn arrows (needed to set a turn instruction) only exist from this zoom
         noneOpCode: 'NONE',             // instruction wanted on the turn leaving the turnaround
         maxQuietAngle: 45.5,            // degrees: a turn sharper than this gets a spoken instruction when left on "Waze selected"
+        leftLeft: { maxMeters: 500, maxDepth: 5, maxVisits: 400, minTotal: -225, maxTotal: -135 }, // left | left alternative search
                    // instruction the turn into a turnaround should carry
         rampType: 4,
         streetType: 1,                  // street to street turnarounds are fine as they are
@@ -98,6 +99,7 @@
     let userRank = 0;
     let results = [];
     let excluded = new Set(store.get('excluded', []));
+    let updateSL = !!store.get('updateSL', true); // setting: copy the speed limit onto turnarounds
     let activeKey = null; // row whose link was last clicked (shown highlighted)
     const forced = new Set(); // review rows the user chose to override (not remembered)
     const picked = (r) => (r.status === 'fix' && !excluded.has(r.key)) || (r.overridable && forced.has(r.key));
@@ -128,9 +130,52 @@
         sdk = window.getWmeSdk({ scriptId: SCRIPT_ID, scriptName: SCRIPT_NAME, mode: 'async' });
         try { await sdk.Events.waitForWmeReady(); } catch (e) { console.warn(LOG, 'waitForWmeReady failed', e); }
         buildUi();
+        try { await setupHoverLayer(); } catch (e) { console.warn(LOG, 'hover layer failed', e); }
         registerEvents();
         scheduleScan(300);
         console.log(LOG, SCRIPT_NAME + ' v' + VERSION + ' loaded');
+    }
+
+
+    // ---------- hover flash ----------
+    // Hovering a row flashes that turnaround's segments on the map (wide and solid, then thin and faint).
+    // Calls are awaited in order, because un-awaited addLayer / addFeatures calls can race.
+    const HOVER_LAYER = 'Turnaround Assist hover';
+    let hoverRow = null, hoverTimer = null, hoverPhase = 1, hoverBusy = false, hoverSeq = 0;
+    async function setupHoverLayer() {
+        await sdk.Map.addLayer({
+            layerName: HOVER_LAYER,
+            styleContext: { getColor: ({ feature }) => feature.properties.color },
+            styleRules: [
+                { predicate: (p) => p.phase === 1, style: { strokeColor: '${getColor}', strokeWidth: 15, strokeOpacity: 0.95 } },
+                { predicate: (p) => p.phase === 0, style: { strokeColor: '${getColor}', strokeWidth: 9, strokeOpacity: 0.6 } },
+            ],
+        });
+        await sdk.Map.setLayerVisibility({ layerName: HOVER_LAYER, visibility: true });
+    }
+    async function drawHover() {
+        if (!hoverRow || hoverBusy) return;
+        hoverBusy = true;
+        try {
+            const r = hoverRow;
+            const color = r.status === 'review' ? '#f39c12' : '#1a73e8';
+            const features = [];
+            for (const id of r.ids) {
+                const seg = await sdk.DataModel.Segments.getById({ segmentId: id });
+                if (seg && seg.geometry) features.push({ type: 'Feature', id: 'wsth' + (++hoverSeq), geometry: seg.geometry, properties: { color, phase: hoverPhase } });
+            }
+            await sdk.Map.removeAllFeaturesFromLayer({ layerName: HOVER_LAYER });
+            if (hoverRow === r) await sdk.Map.addFeaturesToLayer({ layerName: HOVER_LAYER, features });
+        } catch (e) { /* ignore */ } finally { hoverBusy = false; }
+    }
+    function hoverStart(r) {
+        hoverStop();
+        hoverRow = r; hoverPhase = 1; drawHover();
+        hoverTimer = setInterval(() => { hoverPhase = hoverPhase ? 0 : 1; drawHover(); }, 450);
+    }
+    function hoverStop() {
+        clearInterval(hoverTimer); hoverTimer = null;
+        if (hoverRow) { hoverRow = null; try { sdk.Map.removeAllFeaturesFromLayer({ layerName: HOVER_LAYER }); } catch (e) { /* ignore */ } }
     }
 
     function registerEvents() {
@@ -269,6 +314,71 @@
         return found;
     }
 
+
+    // ---------- left | left alternative ----------
+    // From a segment that feeds the turnaround, follow legal turns (never through the turnaround) looking for a
+    // route that gets back onto the segment the turnaround exits onto, within a short distance, whose turns add up
+    // to about a 180 degree left. That is the "left | left" Waze could route instead of using the turnaround.
+    const RAD = Math.PI / 180;
+    function geoBearing(a, b) {
+        const y = Math.sin((b[0] - a[0]) * RAD) * Math.cos(b[1] * RAD);
+        const x = Math.cos(a[1] * RAD) * Math.sin(b[1] * RAD) - Math.sin(a[1] * RAD) * Math.cos(b[1] * RAD) * Math.cos((b[0] - a[0]) * RAD);
+        return (Math.atan2(y, x) / RAD + 360) % 360;
+    }
+    function geoDist(a, b) {
+        const dl = (b[1] - a[1]) * RAD, dn = (b[0] - a[0]) * RAD;
+        const h = Math.sin(dl / 2) ** 2 + Math.cos(a[1] * RAD) * Math.cos(b[1] * RAD) * Math.sin(dn / 2) ** 2;
+        return 2 * 6371000 * Math.asin(Math.sqrt(h));
+    }
+    function segLength(seg) {
+        const c = seg.geometry.coordinates;
+        let d = 0;
+        for (let i = 1; i < c.length; i++) d += geoDist(c[i - 1], c[i]);
+        return d;
+    }
+    const arriveBearing = (seg, n) => { const c = seg.geometry.coordinates; return seg.toNodeId === n ? geoBearing(c[c.length - 2], c[c.length - 1]) : geoBearing(c[1], c[0]); };
+    const leaveBearing = (seg, n) => { const c = seg.geometry.coordinates; return seg.fromNodeId === n ? geoBearing(c[0], c[1]) : geoBearing(c[c.length - 1], c[c.length - 2]); };
+    // Signed turn between two segments at their shared node: negative = left, positive = right.
+    function signedTurn(a, b) {
+        const n = [a.fromNodeId, a.toNodeId].find((x) => x === b.fromNodeId || x === b.toNodeId);
+        if (n === undefined) return null;
+        return ((leaveBearing(b, n) - arriveBearing(a, n) + 540) % 360) - 180;
+    }
+    async function findLeftLeft(feederIds, exitIds, blockedIds) {
+        const L = CFG.leftLeft;
+        const cache = new Map();
+        const get = async (id) => {
+            if (!cache.has(id)) cache.set(id, await sdk.DataModel.Segments.getById({ segmentId: id }));
+            return cache.get(id);
+        };
+        let visits = 0;
+        const walk = async (seg, total, sum, depth) => {
+            if (depth > L.maxDepth || ++visits > L.maxVisits) return false;
+            for (const t of await sdk.DataModel.Turns.getTurnsFromSegment({ segmentId: seg.id })) {
+                if (!t.isAllowed || blockedIds.has(t.toSegmentId)) continue;
+                const next = await get(t.toSegmentId);
+                if (!next || !next.geometry) continue;
+                const turn = signedTurn(seg, next);
+                if (turn === null) continue;
+                const cum = sum + turn;
+                // The segment the turnaround exits onto is where the routes meet again, so its own length does not count.
+                if (exitIds.has(next.id)) {
+                    if (cum >= L.minTotal && cum <= L.maxTotal) return true;
+                    continue;
+                }
+                const dist = total + segLength(next);
+                if (dist > L.maxMeters) continue;
+                if (await walk(next, dist, cum, depth + 1)) return true;
+            }
+            return false;
+        };
+        for (const id of feederIds) {
+            const f = await get(id);
+            if (f && f.geometry && (await walk(f, 0, 0, 0))) return true;
+        }
+        return false;
+    }
+
     // ---------- the rules ----------
     function review(res, text) {
         res.status = 'review';
@@ -364,6 +474,23 @@
         // Lowest type among the usable neighbors at both ends.
         const targetType = primaryOnly ? CFG.primaryStreetType : CFG.typeOrder.find((t) => types.has(t));
 
+        // Left | left check: the type only has to match the frontage road when Waze could otherwise route a
+        // left, then a left, instead of using the turnaround. Mixed frontage types are left for review.
+        const feederSet = new Set();
+        const exitSet = new Set();
+        for (const m of members) {
+            for (const t of await sdk.DataModel.Turns.getTurnsToSegment({ segmentId: m.id })) {
+                if (t.isAllowed && !idSet.has(t.fromSegmentId)) feederSet.add(t.fromSegmentId);
+            }
+            for (const t of await sdk.DataModel.Turns.getTurnsFromSegment({ segmentId: m.id })) {
+                if (t.isAllowed && !idSet.has(t.toSegmentId)) exitSet.add(t.toSegmentId);
+            }
+        }
+        const leftLeft = feederSet.size && exitSet.size ? await findLeftLeft(feederSet, exitSet, idSet) : false;
+        if (leftLeft && types.size > 1) {
+            return review(res, 'Mixed road types at the ends (' + [...types].map(typeName).join(' / ') + ') and a left | left follows. Check by hand.');
+        }
+
         // Lock goal: L5, or this editor's own maximum if lower.
         const lockGoal = Math.min(CFG.targetLockRank, userRank);
 
@@ -373,6 +500,7 @@
         const copyRoute = targetRoute !== null && targetRoute !== undefined && targetRoute !== targetType;
 
         for (const seg of members) {
+            if (!leftLeft) break; // no left | left: type, lock and routing are left alone
             const changes = {};
             if (seg.roadType !== targetType) changes.roadType = targetType;
             if (seg.lockRank < lockGoal) changes.lockRank = lockGoal;
@@ -436,7 +564,7 @@
 
         // Speed limit: if the segment feeding the turnaround and the segment it exits onto have the same speed
         // limit, the turnaround gets that exact value. If they differ (or either has none), it is left alone.
-        if (oneWay && slFeeders.size) {
+        if (updateSL && leftLeft && oneWay && slFeeders.size) {
             const feederIds = slFeeders;
             const exitIds = new Set();
             for (const m of members) {
@@ -479,6 +607,7 @@
 
         if (!res.perSegment.length && !turnFixes.length) {
             const turnIssues = [];
+            if (!leftLeft) turnIssues.push('No left | left after this turnaround, so type, lock, routing and speed limit are left as is.');
             if (turnBlocked) turnIssues.push('The turn onto the turnaround is not enabled.');
             if (turnAmbiguous) turnIssues.push('Several turns lead onto the turnaround and none is set to U-turn (set the right one by hand).');
             if (turnIssues.length) return review(res, turnIssues.join(' '));
@@ -494,6 +623,7 @@
         if (res.perSegment.some((p) => p.changes.routingRoadType !== undefined)) parts.push('Routing: ' + typeName(targetRoute));
         if (res.perSegment.some((p) => p.changes.fwdSpeedLimit !== undefined || p.changes.revSpeedLimit !== undefined)) parts.push('Speed limit: ' + Math.round(res.speedLimit / 1.609344) + ' mph');
         for (const f of turnFixes) parts.push(f.label);
+        if (!leftLeft) parts.push('no left | left, type not changed');
         // Not fixable by the script: shown so it is not forgotten.
         if (turnAmbiguous) parts.push('also set the U-turn by hand (several turns lead in)');
         if (turnBlocked) parts.push('turn onto it is not enabled');
@@ -695,6 +825,7 @@
       border:1px solid #dadce0;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.35);padding:8px;cursor:default}
     .wsta-panel.wsta-open{display:block}
     .wsta-summary{font-weight:600;margin-bottom:6px}
+    .wsta-opts{display:block;margin-top:8px;cursor:pointer;user-select:none}
     .wsta-list{max-height:42vh;overflow:auto;border-top:1px solid #e3e8ec}
     .wsta-row{display:flex;gap:6px;align-items:flex-start;padding:5px 2px;border-bottom:1px solid #eef1f3}
     .wsta-row input{margin-top:2px}
@@ -750,7 +881,18 @@
         ui.applyBtn = el('button', 'wsta-primary', 'Apply checked');
         for (const b of [ui.allBtn, ui.noneBtn, ui.applyBtn]) b.type = 'button';
         actions.append(ui.allBtn, ui.noneBtn, ui.applyBtn);
-        ui.panel.append(ui.summary, ui.list, actions);
+        const opts = el('label', 'wsta-opts');
+        ui.slBox = el('input');
+        ui.slBox.type = 'checkbox';
+        ui.slBox.checked = updateSL;
+        opts.append(ui.slBox, document.createTextNode(' Update speed limits'));
+        opts.title = 'When on, a turnaround gets the speed limit its inbound and outbound segments share. When off, speed limits are never changed.';
+        ui.slBox.addEventListener('change', () => {
+            updateSL = ui.slBox.checked;
+            store.set('updateSL', updateSL);
+            scheduleScan(0);
+        });
+        ui.panel.append(ui.summary, ui.list, opts, actions);
 
         ui.bar.append(ui.grip, ui.status, ui.minBtn, ui.panel);
         document.body.appendChild(ui.bar);
@@ -901,6 +1043,7 @@
 
         ui.summary.textContent = fix.length + ' to fix · ' + rev.length + ' need review · ' + ok.length + ' already match';
 
+        hoverStop(); // the rows are rebuilt, so a mouseleave would never arrive
         ui.list.textContent = '';
         for (const r of [...fix, ...rev]) {
             const row = el('div', 'wsta-row' + (r.status === 'review' ? ' wsta-review' : '') + (r.key === activeKey ? ' wsta-active' : ''));
@@ -932,6 +1075,8 @@
             });
             const text = el('span', 'wsta-note', r.status === 'fix' ? r.summary : 'Review: ' + r.note);
             row.append(box, link, text);
+            row.addEventListener('mouseenter', () => hoverStart(r));
+            row.addEventListener('mouseleave', hoverStop);
             ui.list.appendChild(row);
         }
         if (!fix.length && !rev.length) ui.list.appendChild(el('div', 'wsta-row', 'Nothing to change in this view.'));

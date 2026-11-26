@@ -14,13 +14,25 @@ A turnaround needs fixing when any of these differ from what it should be:
 
 | Property | Rule |
 | --- | --- |
-| Road type | Copied from the frontage road. Only Ramp, Minor Highway and Major Highway count. If the two ends differ, the lowest type wins (Ramp, then Minor Hwy, then Major Hwy). A ramp that branches off the frontage road does not decide the type when a Minor or Major Highway (named or unnamed) is also at that end. |
+| Road type | Only changed when a **left | left** is possible (see below). Copied from the frontage road. Only Ramp, Minor Highway and Major Highway count. If the two ends differ, the lowest type wins (Ramp, then Minor Hwy, then Major Hwy). A ramp that branches off the frontage road does not decide the type when a Minor or Major Highway (named or unnamed) is also at that end. |
 | Lock | Raised to L5, or to your own maximum rank if that is lower. It never lowers a lock. |
 | Routing (+1) | Copied only when every named frontage segment shares the same routing type. |
 | Speed limit | If every inbound segment and every outbound segment of a one-way turnaround has the same speed limit (in the direction of travel), the turnaround gets that exact limit. If they differ, or any has none, it is left alone. |
 | Turn onto the turnaround | The turn from the frontage road into the first turnaround segment should be enabled and have its Voice prompt set to **U-turn**. The script sets it for you (see below). |
 
 Turnarounds that connect street to street are left alone. A turnaround with a Primary Street on every side becomes a Primary Street at L5.
+
+### Left | left check
+
+A turnaround should match the frontage road's type only when Waze could otherwise route a left turn followed by a left turn back to where the turnaround ends. The script follows legal turns from the segment feeding the turnaround (never through the turnaround) and looks for a route back onto the segment it exits onto, within 500 m and 5 segments, whose turns add up to about a 180 degree left.
+
+- **Left | left found, one road type at the ends:** type, lock, routing and speed limit are applied as described above.
+- **Left | left found, mixed road types:** the row is flagged for review and nothing is changed.
+- **No left | left:** type, lock, routing and speed limit are left alone and the row is flagged so you can check it. U-turn and exit-turn fixes still apply.
+
+### Speed limit
+
+The **Update speed limits** checkbox in the list panel turns the speed limit update on or off (on by default).
 
 ### The U-turn voice prompt
 
@@ -71,6 +83,10 @@ Edit those to match your area's conventions. The type names and ranking are in t
 
 ## Changelog
 
+- 2026.11.25.04: **Update speed limits** checkbox in the list panel to turn speed limit updates off.
+- 2026.11.25.03: The left | left distance limit no longer counts the length of the segment the turnaround exits onto.
+- 2026.11.25.02: Hovering a row flashes that turnaround on the map.
+- 2026.11.25.01: Left | left check. The type only changes when a left | left is possible; mixed road types and turnarounds with no left | left are flagged for review.
 - 2026.11.22.03: Copies the speed limit to the turnaround when all inbound and outbound segments share it (shown in mph in the list). A ramp at an end no longer decides the type when an unnamed Minor or Major Highway is also there.
 - 2026.11.20.01: Primary Street to Primary Street turnarounds are set to Primary Street at L5.
 - 2026.11.12.06: Sets turns even when you apply at zoom 16 or lower: it centres on the turn, zooms in, sets it (with retries), then restores your view and deselects.
