@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Segment Turnaround Assist
 // @namespace    https://greasyfork.org/users/820296-txagbq
-// @version      2026.11.26.02
+// @version      2026.11.27.01
 // @description  Finds segments named "Turnaround" and matches them to the frontage road (road type, lock, +1 routing). Review a checklist, apply, then save in WME yourself.
 // @author       TxAgBQ
 // @license      MIT
@@ -69,7 +69,7 @@
         turnMinZoom: 17,                // turn arrows (needed to set a turn instruction) only exist from this zoom
         noneOpCode: 'NONE',             // instruction wanted on the turn leaving the turnaround
         maxQuietAngle: 45.5,            // degrees: a turn sharper than this gets a spoken instruction when left on "Waze selected"
-        leftLeft: { maxMeters: 500, maxDepth: 10, maxVisits: 1500, minTotal: -225, maxTotal: -135 }, // left | left alternative search
+        leftLeft: { maxMeters: 800, maxDepth: 10, maxVisits: 5000, minTotal: -225, maxTotal: -135 }, // left | left alternative search
                    // instruction the turn into a turnaround should carry
         rampType: 4,
         streetType: 1,                  // street to street turnarounds are fine as they are
